@@ -2,10 +2,17 @@
 (()=>{
 let FOLDER='';
 const scope='https://www.googleapis.com/auth/drive.file',api='https://www.googleapis.com/drive/v3/files';
-let token='',expires=0,client=null,config=null,folderGranted=false,working=false;
+let token='',expires=0,client=null,config=null,folderGranted=false,working=false,authPending=false,authVersion=0,authTimer=null;
 const el=id=>document.getElementById(id),say=t=>el('driveStatus').textContent=t;
 const stamp=()=>new Date().toISOString().replace(/[:.]/g,'-');
-function controls(){for(const id of ['drivePrepare','driveConnect','driveFolder','driveSave','driveLoad','driveDisconnect','packageExport','packageImport'])el(id).disabled=working||(id==='driveConnect'&&!client)||(['driveFolder','driveSave','driveLoad','driveDisconnect'].includes(id)&&!token)||(id==='driveSave'&&!folderGranted);}
+function controls(){for(const id of ['drivePrepare','driveConnect','driveFolder','driveSave','driveLoad','driveDisconnect','packageExport','packageImport'])el(id).disabled=working||busy||(id==='driveConnect'&&!client)||(['driveFolder','driveSave','driveLoad','driveDisconnect'].includes(id)&&!token)||(id==='driveSave'&&!folderGranted);el('driveCancelAuth').hidden=!authPending;el('driveCancelAuth').disabled=!authPending;}
+window.addEventListener('mv-lock-change',controls);
+function finishAuth(message){clearTimeout(authTimer);authTimer=null;authPending=false;working=false;lock(false);controls();say(message);}
+function tokenClient(version){return google.accounts.oauth2.initTokenClient({client_id:config.clientId,scope,include_granted_scopes:false,error_callback:()=>{if(version!==authVersion)return;finishAuth('Google接続を完了できませんでした。ポップアップの許可を確認し、ChromeまたはEdgeで開いて再接続してください。');},callback:response=>{
+ if(version!==authVersion||!authPending)return;
+ if(response.error||!response.access_token||!google.accounts.oauth2.hasGrantedAllScopes(response,scope)){token='';finishAuth('Googleへの接続・アクセス許可が完了しませんでした。');}
+ else{token=response.access_token;expires=Date.now()+Number(response.expires_in||3600)*1000-60000;folderGranted=false;finishAuth('Google接続済み。保存先を選択するか、共有版を読み込んでください。');}
+}});}
 async function operation(fn){if(working||busy)return;working=true;pause();lock(true);controls();try{await fn();}catch(e){say(e.message||String(e));}finally{working=false;lock(false);controls();}}
 function requireToken(){if(!token||Date.now()>=expires){token='';folderGranted=false;controls();throw Error('Google接続の期限が切れました。「Googleに接続」を押してください。');}}
 async function request(url,options={}){requireToken();const res=await fetch(url,{...options,headers:{...options.headers,Authorization:'Bearer '+token},signal:AbortSignal.timeout(120000)});if(res.status===401){token='';folderGranted=false;throw Error('接続の期限が切れました。Googleに再接続してください。');}if(!res.ok&&res.status!==308){throw Error(`Drive通信エラー (${res.status})。権限・容量・接続を確認してください。保存結果が不明な場合はDriveで確認してから再実行してください。`);}return res;}
@@ -19,12 +26,11 @@ el('drivePrepare').onclick=()=>operation(async()=>{
  if(!window.google?.accounts)await loadScript('https://accounts.google.com/gsi/client');
  if(!window.gapi)await loadScript('https://apis.google.com/js/api.js');
  await new Promise((resolve,reject)=>gapi.load('picker',{callback:resolve,onerror:()=>reject(Error('Pickerを読み込めません。')),timeout:20000,ontimeout:()=>reject(Error('Pickerの読み込みがタイムアウトしました。'))}));
- client=google.accounts.oauth2.initTokenClient({client_id:config.clientId,scope,include_granted_scopes:false,error_callback:()=>{working=false;lock(false);controls();say('Google接続を完了できませんでした。ポップアップの許可も確認してください。');},callback:response=>{
-  working=false;lock(false);if(response.error||!response.access_token||!google.accounts.oauth2.hasGrantedAllScopes(response,scope)){token='';say('Googleへの接続・アクセス許可が完了しませんでした。');}
-  else{token=response.access_token;expires=Date.now()+Number(response.expires_in||3600)*1000-60000;folderGranted=false;say('Google接続済み。保存先を選択するか、共有版を読み込んでください。');}controls();}});
+ client=tokenClient(++authVersion);
  try{localStorage.setItem('mv-drive-client',JSON.stringify(config));}catch{}say('準備完了。「Googleに接続」を押してください。');
 });
-el('driveConnect').onclick=()=>{if(working||busy||!client)return;pause();working=true;lock(true);controls();try{client.requestAccessToken({prompt:'select_account'});}catch(e){working=false;lock(false);controls();say('Google接続を開始できませんでした。ポップアップ設定を確認してください。');}};
+el('driveConnect').onclick=()=>{if(working||busy||!client)return;pause();working=true;authPending=true;token='';folderGranted=false;const version=++authVersion;lock(true);controls();say('Googleの認証画面でアカウントと許可を確認してください。表示されない場合は「接続待ちを中止」を押し、ChromeまたはEdgeで開いてください。');authTimer=setTimeout(()=>{if(version!==authVersion)return;++authVersion;finishAuth('Google接続がタイムアウトしました。ポップアップの許可を確認し、再接続してください。');},120000);try{client=tokenClient(version);client.requestAccessToken({prompt:'select_account'});}catch(e){++authVersion;finishAuth('Google接続を開始できませんでした。ポップアップ設定を確認してください。');}};
+el('driveCancelAuth').onclick=()=>{if(!authPending)return;++authVersion;finishAuth('接続待ちを中止しました。Googleの認証画面が残っている場合は閉じてください。');};
 function picker(folder){requireToken();return new Promise((resolve,reject)=>{
  const view=new google.picker.DocsView(google.picker.ViewId.DOCS);
  if(!folder)view.setParent(FOLDER);

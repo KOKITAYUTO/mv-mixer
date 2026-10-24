@@ -16,7 +16,7 @@ function now(){return running?M.clamp(offset+ctx.currentTime-started,0,total):of
 function stopSources(){for(const s of sources){try{s.source.stop();}catch{}s.source.disconnect();s.gain.disconnect();}sources=[];}
 function pause(){if(running)offset=now();running=false;stopSources();Object.values(media).forEach(m=>{if(m instanceof HTMLVideoElement)m.pause();});$('#play').textContent='▶ 再生';}
 function dispose(){pause();Object.values(media).forEach(m=>{if(m instanceof HTMLVideoElement){m.removeAttribute('src');m.load();}});urls.forEach(URL.revokeObjectURL);urls=[];media={};decoded=[];}
-function lock(value){busy=value;document.querySelectorAll('aside button, aside input, aside select, #themes button, #play, #reset, #seek').forEach(e=>e.disabled=value);}
+function lock(value){busy=value;document.querySelectorAll('aside button, aside input, aside select, #themes button, #play, #reset, #seek').forEach(e=>e.disabled=value);window.dispatchEvent(new Event('mv-lock-change'));}
 async function task(fn){if(busy)return;lock(true);try{await fn();}catch(e){pause();status(e.message||String(e),true);}finally{lock(false);}}
 async function loadMedia(file){
   const url=URL.createObjectURL(file);urls.push(url);
